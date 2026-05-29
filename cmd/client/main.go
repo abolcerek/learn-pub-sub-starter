@@ -24,12 +24,15 @@ func main() {
 		log.Fatal(err)
 	}
 	NewGameState := gamelogic.NewGameState(username)
-	exchange := routing.ExchangePerilDirect
-	queueName := routing.PauseKey + "." + username
-	routingKey := routing.PauseKey
-	// queueType is 1 if it is durable, it is 2 if it is transient
-	queueType := 2
-	err = pubsub.SubscribeJSON(connection, exchange, queueName, routingKey, pubsub.SimpleQueueType(queueType), handlerPause(NewGameState))
+	err = CreateAndBind("pause", username, connection, NewGameState)
+	if err != nil {
+		log.Fatal(err)
+	}
+	err = CreateAndBind("army", username, connection, NewGameState)
+	if err != nil {
+		log.Fatal(err)
+	}
+	newConn, err := connection.Channel()
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -41,7 +44,8 @@ func main() {
 		if words[0] == "spawn" {
 			err = NewGameState.CommandSpawn(words)
 			if err != nil {
-				log.Fatal(err)
+				fmt.Println("Incorrect location or batallion type")
+				continue
 			}
 		} else if words[0] == "move" {
 			move, err := NewGameState.CommandMove(words)
@@ -50,6 +54,12 @@ func main() {
 				continue
 			}
 			fmt.Println(move)
+			exchange := routing.ExchangePerilTopic
+			routingKey := routing.ArmyMovesPrefix + "." + username
+			err = pubsub.PublishJSON(newConn, exchange, routingKey, move)
+			if err != nil {
+				log.Fatal(err)
+			}
 		} else if words[0] == "status" {
 			NewGameState.CommandStatus()
 		} else if words[0] == "help" {
@@ -76,4 +86,37 @@ func handlerPause(gs *gamelogic.GameState) func(routing.PlayingState) {
 		defer fmt.Print("> ")
 		gs.HandlePause(ps)
 	}
+}
+
+func handlerMove(gs *gamelogic.GameState) func(gamelogic.ArmyMove) {
+	return func(ms gamelogic.ArmyMove) {
+		defer fmt.Print("> ")
+		gs.HandleMove(ms)
+	}
+}
+
+// queueType is 1 if it is durable, it is 2 if it is transient
+func CreateAndBind(Type string, username string, conn *amqp.Connection, gamestate *gamelogic.GameState) error {
+	if Type == "pause" {
+		exchange := routing.ExchangePerilDirect
+		queueName := routing.PauseKey + "." + username
+		routingKey := routing.PauseKey
+		queueType := 2
+		err := pubsub.SubscribeJSON(conn, exchange, queueName, routingKey, pubsub.SimpleQueueType(queueType), handlerPause(gamestate))
+		if err != nil {
+			return err
+		}
+	} else if Type == "army" {
+		exchange := routing.ExchangePerilTopic
+		queueName := routing.ArmyMovesPrefix + "." + username
+		routingKey := routing.ArmyMovesPrefix + ".*"
+		queueType := 2
+		err := pubsub.SubscribeJSON(conn, exchange, queueName, routingKey, pubsub.SimpleQueueType(queueType), handlerMove(gamestate))
+		if err != nil {
+			return err
+		}
+	} else {
+		return fmt.Errorf("Unknown type")
+	}
+	return nil 
 }
