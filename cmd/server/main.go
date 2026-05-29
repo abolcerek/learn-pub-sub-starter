@@ -5,8 +5,9 @@ import (
 	"log"
 	"os"
 	"os/signal"
-	"github.com/bootdotdev/learn-pub-sub-starter/internal/pubsub"
-	"github.com/bootdotdev/learn-pub-sub-starter/internal/routing"
+	"github.com/abolcerek/learn-pub-sub-starter/internal/pubsub"
+	"github.com/abolcerek/learn-pub-sub-starter/internal/routing"
+	"github.com/abolcerek/learn-pub-sub-starter/internal/gamelogic"
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
@@ -18,18 +19,38 @@ func main() {
 	}
 	defer connection.Close()
 	fmt.Println("Connection was successfull!")
-	newConn, err := connection.Channel()
-	if err != nil {
-		log.Fatal(err)
-	}
+	gamelogic.PrintServerHelp()
 	exchange := routing.ExchangePerilDirect
 	key := routing.PauseKey
-	data := routing.PlayingState{
-		IsPaused: true,
-	}
-	err = pubsub.PublishJSON(newConn, exchange, key, data)
+	newConn, err := connection.Channel()
+	var data routing.PlayingState
 	if err != nil {
 		log.Fatal(err)
+	}
+	for {
+		words := gamelogic.GetInput()
+		if len(words) == 0 {
+			continue
+		}
+		if words[0] == "pause" {
+			fmt.Println("Sending a pause message...")
+			data.IsPaused = true
+				err = pubsub.PublishJSON(newConn, exchange, key, data)
+				if err != nil {
+					log.Fatal(err)
+				}
+		} else if words[0] == "resume" {
+			fmt.Println("Sending a resume message...")
+			data.IsPaused = false
+				err = pubsub.PublishJSON(newConn, exchange, key, data)
+				if err != nil {
+					log.Fatal(err)
+				}
+		} else if words[0] == "quit" {
+			break
+		} else {
+			fmt.Println("Unknown command")
+		}
 	}
 	signalChan := make(chan os.Signal, 1)
 	signal.Notify(signalChan, os.Interrupt)
