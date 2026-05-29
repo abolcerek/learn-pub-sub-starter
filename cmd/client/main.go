@@ -23,16 +23,16 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	NewGameState := gamelogic.NewGameState(username)
 	exchange := routing.ExchangePerilDirect
 	queueName := routing.PauseKey + "." + username
 	routingKey := routing.PauseKey
 	// queueType is 1 if it is durable, it is 2 if it is transient
 	queueType := 2
-	_, _, err = pubsub.DeclareAndBind(connection, exchange, queueName, routingKey, pubsub.SimpleQueueType(queueType))
+	err = pubsub.SubscribeJSON(connection, exchange, queueName, routingKey, pubsub.SimpleQueueType(queueType), handlerPause(NewGameState))
 	if err != nil {
 		log.Fatal(err)
 	}
-	NewGameState := gamelogic.NewGameState(username)
 	for {
 		words := gamelogic.GetInput()
 		if len(words) == 0 {
@@ -46,7 +46,8 @@ func main() {
 		} else if words[0] == "move" {
 			move, err := NewGameState.CommandMove(words)
 			if err != nil {
-				log.Fatal(err)
+				fmt.Println("Game is paused, you must wait for it to resume")
+				continue
 			}
 			fmt.Println(move)
 		} else if words[0] == "status" {
@@ -68,4 +69,11 @@ func main() {
 	<-signalChan
 	fmt.Println()
 	fmt.Println("Program is shutting down...")
+}
+
+func handlerPause(gs *gamelogic.GameState) func(routing.PlayingState) {
+	return func(ps routing.PlayingState) {
+		defer fmt.Print("> ")
+		gs.HandlePause(ps)
+	}
 }

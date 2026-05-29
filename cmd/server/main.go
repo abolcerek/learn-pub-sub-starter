@@ -20,9 +20,9 @@ func main() {
 	defer connection.Close()
 	fmt.Println("Connection was successfull!")
 	gamelogic.PrintServerHelp()
-	exchange := routing.ExchangePerilTopic
-	key := routing.GameLogSlug + "*"
-	queueName := "game_logs"
+	exchange := routing.ExchangePerilDirect
+	key := routing.PauseKey
+	queueName := "pause_queue"
 	// queueType is 1 if it is durable, it is 2 if it is transient
 	queueType := 1
 	newConn, err := connection.Channel()
