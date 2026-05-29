@@ -20,13 +20,17 @@ func main() {
 	defer connection.Close()
 	fmt.Println("Connection was successfull!")
 	gamelogic.PrintServerHelp()
-	exchange := routing.ExchangePerilDirect
-	key := routing.PauseKey
+	exchange := routing.ExchangePerilTopic
+	key := routing.GameLogSlug + "*"
+	queueName := "game_logs"
+	// queueType is 1 if it is durable, it is 2 if it is transient
+	queueType := 1
 	newConn, err := connection.Channel()
-	var data routing.PlayingState
 	if err != nil {
 		log.Fatal(err)
 	}
+	_, _, err = pubsub.DeclareAndBind(connection, exchange, queueName, key, pubsub.SimpleQueueType(queueType))
+	var data routing.PlayingState
 	for {
 		words := gamelogic.GetInput()
 		if len(words) == 0 {
