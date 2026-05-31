@@ -81,17 +81,23 @@ func main() {
 	fmt.Println("Program is shutting down...")
 }
 
-func handlerPause(gs *gamelogic.GameState) func(routing.PlayingState) {
-	return func(ps routing.PlayingState) {
+func handlerPause(gs *gamelogic.GameState) func(routing.PlayingState) string {
+	return func(ps routing.PlayingState) string {
 		defer fmt.Print("> ")
 		gs.HandlePause(ps)
+		return "Ack"
 	}
 }
 
-func handlerMove(gs *gamelogic.GameState) func(gamelogic.ArmyMove) {
-	return func(ms gamelogic.ArmyMove) {
+func handlerMove(gs *gamelogic.GameState) func(gamelogic.ArmyMove) string {
+	return func(ms gamelogic.ArmyMove) string {
 		defer fmt.Print("> ")
-		gs.HandleMove(ms)
+		outcome := gs.HandleMove(ms)
+		if outcome == 1 || outcome == 2 {
+			return "Ack"
+		} else {
+			return "NackDiscard"
+		}
 	}
 }
 

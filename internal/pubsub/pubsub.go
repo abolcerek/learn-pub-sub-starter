@@ -3,8 +3,10 @@ package pubsub
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 
+	"github.com/abolcerek/learn-pub-sub-starter/internal/routing"
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
@@ -34,7 +36,7 @@ func PublishJSON[T any](ch * amqp.Channel, exchange, key string, val T) error {
 	return nil
 }
 
-func SubscribeJSON[T any](conn *amqp.Connection, exchange, queueName, key string, queueType SimpleQueueType, handler func(T),) error {
+func SubscribeJSON[T any](conn *amqp.Connection, exchange, queueName, key string, queueType SimpleQueueType, handler func(T) string,) error {
 	newConn, _, err := DeclareAndBind(conn, exchange, queueName, key, queueType)
 	if err != nil {
 		return err
@@ -44,15 +46,24 @@ func SubscribeJSON[T any](conn *amqp.Connection, exchange, queueName, key string
 		return err
 	}
 	go func() {
-		for delivery := range deliveries {
-			var msg *T
-			err = json.Unmarshal(delivery.Body, &msg)
+		for msg := range deliveries {
+			var buffer *T
+			err = json.Unmarshal(msg.Body, &buffer)
 			if err != nil {
 				log.Fatal("Error marshalling delivery response")
 			}
-			handler(*msg)
-			delivery.Ack(false)
-		}
+			acktype := handler(*buffer)
+			switch acktype {
+			case "Ack":
+				msg.Ack(false)
+			case "NackRequeue":
+				msg.Nack(false, true)
+			case "NackDiscard":
+				msg.Nack(false, false)
+			default:
+				fmt.Println("Unknown Ack type")
+			}
+		} 
 	}()
 	return nil
 }
@@ -77,7 +88,10 @@ func DeclareAndBind(conn *amqp.Connection, exchange string, queueName string, ke
 		autoDelete = true
 		exclusive = true
 	}
-	queue, err := newConn.QueueDeclare(queueName, durable, autoDelete, exclusive, false, nil)
+	args := amqp.Table{
+		"x-dead-letter-exchange": routing.ExchangePerilFanout,
+	}
+	queue, err := newConn.QueueDeclare(queueName, durable, autoDelete, exclusive, false, args)
 	if err != nil {
 		return &amqp.Channel{}, amqp.Queue{}, err
 	}
