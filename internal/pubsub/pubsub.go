@@ -17,6 +17,14 @@ const (
 	Transient
 )
 
+type Acktype int
+
+const (
+	Ack Acktype = iota
+	NackRequeue
+	NackDiscard
+)
+
 func PublishJSON[T any](ch * amqp.Channel, exchange, key string, val T) error {
 	bytes, err := json.Marshal(val)
 	if err != nil {
@@ -36,7 +44,7 @@ func PublishJSON[T any](ch * amqp.Channel, exchange, key string, val T) error {
 	return nil
 }
 
-func SubscribeJSON[T any](conn *amqp.Connection, exchange, queueName, key string, queueType SimpleQueueType, handler func(T) string,) error {
+func SubscribeJSON[T any](conn *amqp.Connection, exchange, queueName, key string, queueType SimpleQueueType, handler func(T) Acktype,) error {
 	newConn, _, err := DeclareAndBind(conn, exchange, queueName, key, queueType)
 	if err != nil {
 		return err
@@ -54,11 +62,11 @@ func SubscribeJSON[T any](conn *amqp.Connection, exchange, queueName, key string
 			}
 			acktype := handler(*buffer)
 			switch acktype {
-			case "Ack":
+			case Ack:
 				msg.Ack(false)
-			case "NackRequeue":
+			case NackRequeue:
 				msg.Nack(false, true)
-			case "NackDiscard":
+			case NackDiscard:
 				msg.Nack(false, false)
 			default:
 				fmt.Println("Unknown Ack type")

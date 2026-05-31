@@ -32,6 +32,10 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	err = CreateAndBind("war", username, connection, NewGameState)
+	if err != nil {
+		log.Fatal(err)
+	}
 	newConn, err := connection.Channel()
 	if err != nil {
 		log.Fatal(err)
@@ -81,28 +85,66 @@ func main() {
 	fmt.Println("Program is shutting down...")
 }
 
-func handlerPause(gs *gamelogic.GameState) func(routing.PlayingState) string {
-	return func(ps routing.PlayingState) string {
+func handlerPause(gs *gamelogic.GameState) func(routing.PlayingState) pubsub.Acktype {
+	return func(ps routing.PlayingState) pubsub.Acktype {
 		defer fmt.Print("> ")
 		gs.HandlePause(ps)
-		return "Ack"
+		return pubsub.Ack
 	}
 }
 
-func handlerMove(gs *gamelogic.GameState) func(gamelogic.ArmyMove) string {
-	return func(ms gamelogic.ArmyMove) string {
+func handlerMove(gs *gamelogic.GameState, channel *amqp.Channel, username string) func(gamelogic.ArmyMove) pubsub.Acktype {
+	return func(ms gamelogic.ArmyMove) pubsub.Acktype {
 		defer fmt.Print("> ")
 		outcome := gs.HandleMove(ms)
-		if outcome == 1 || outcome == 2 {
-			return "Ack"
+		if outcome == 1 {
+			return pubsub.Ack
+		} else if outcome == 2 {
+			exchange := routing.ExchangePerilTopic
+			routingKey := routing.WarRecognitionsPrefix + "." + username
+			data := gamelogic.RecognitionOfWar{
+				Attacker: ms.Player,
+				Defender: gs.GetPlayerSnap(),
+			}
+			err := pubsub.PublishJSON(channel, exchange, routingKey, data)
+			if err != nil {
+				return pubsub.NackRequeue
+			}
+			return pubsub.Ack
 		} else {
-			return "NackDiscard"
+			return pubsub.NackDiscard
+		}
+	}
+}
+
+func handlerWar(gs *gamelogic.GameState) func(gamelogic.RecognitionOfWar) pubsub.Acktype {
+	return func(outcome gamelogic.RecognitionOfWar) pubsub.Acktype {
+		defer fmt.Print("> ")
+		warOutcome, _, _ := gs.HandleWar(outcome)
+		switch warOutcome {
+		case gamelogic.WarOutcomeNotInvolved:
+			return pubsub.NackRequeue
+		case gamelogic.WarOutcomeNoUnits:
+			return pubsub.NackDiscard
+		case gamelogic.WarOutcomeOpponentWon:
+			return pubsub.Ack
+		case gamelogic.WarOutcomeYouWon:
+			return pubsub.Ack
+		case gamelogic.WarOutcomeDraw:
+			return pubsub.Ack
+		default:
+			fmt.Print(warOutcome)
+			return pubsub.NackDiscard
 		}
 	}
 }
 
 // queueType is 1 if it is durable, it is 2 if it is transient
 func CreateAndBind(Type string, username string, conn *amqp.Connection, gamestate *gamelogic.GameState) error {
+	Chan, err := conn.Channel()
+		if err != nil {
+			return err
+		}
 	if Type == "pause" {
 		exchange := routing.ExchangePerilDirect
 		queueName := routing.PauseKey + "." + username
@@ -117,7 +159,16 @@ func CreateAndBind(Type string, username string, conn *amqp.Connection, gamestat
 		queueName := routing.ArmyMovesPrefix + "." + username
 		routingKey := routing.ArmyMovesPrefix + ".*"
 		queueType := 2
-		err := pubsub.SubscribeJSON(conn, exchange, queueName, routingKey, pubsub.SimpleQueueType(queueType), handlerMove(gamestate))
+		err = pubsub.SubscribeJSON(conn, exchange, queueName, routingKey, pubsub.SimpleQueueType(queueType), handlerMove(gamestate, Chan, username))
+		if err != nil {
+			return err
+		}
+	} else if Type == "war" {
+		exchange := routing.ExchangePerilTopic
+		queueName := "war"
+		routingKey := routing.WarRecognitionsPrefix + ".*"
+		queueType := 1
+		err := pubsub.SubscribeJSON(conn, exchange, queueName, routingKey, pubsub.SimpleQueueType(queueType), handlerWar(gamestate))
 		if err != nil {
 			return err
 		}
